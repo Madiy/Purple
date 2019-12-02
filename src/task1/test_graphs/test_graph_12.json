@@ -1,0 +1,1 @@
+{"idx": 1, "name": "name0", "points": [{"idx": 0, "post_idx": "null"}, {"idx": 1, "post_idx": "null"}, {"idx": 2, "post_idx": "null"}, {"idx": 3, "post_idx": "null"}, {"idx": 4, "post_idx": "null"}], "lines": [{"idx": 1, "length": 3, "points": [0, 1]}, {"idx": 2, "length": 3, "points": [1, 2]}, {"idx": 3, "length": 3, "points": [1, 4]}]}
