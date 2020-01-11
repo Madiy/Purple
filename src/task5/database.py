@@ -15,13 +15,12 @@ class ServerData(object):
         self.update()
         map_graph_json = self.server_interface.get_map_by_level(0)
         self.graph = utils.graph_from_json_string(map_graph_json)
+        # self.game_info = self.server_interface.gameInfo()        
     
     def update(self):
-
         objects_map_graph_json = self.server_interface.get_map_by_level(1)
         self.buildings = utils.buildings_from_json_string(objects_map_graph_json)
         self.player_info = json.loads(self.server_interface.getPlayerInfo())
-        self.game_info = self.server_interface.gameInfo()        
     
     def getGraph(self):
         return self.graph

@@ -10,6 +10,7 @@ import time
 import traceback
 import math
 import datetime
+from functools import reduce
 
 GoodsTypes = ['product','armor']
     
@@ -36,7 +37,7 @@ class TrainTask():
         self.old_speed = 0
         self.shortest_paths_to_endpoints = []
         
-    def makeTask(self,goods_type,priority):
+    def makeTask(self,goods_type,priority=1):
         if self.goods_type == goods_type:
             self.priority = priority
         else:
@@ -147,12 +148,36 @@ class TrainTask():
         for train in all_trains:
             distance = train['position']-position
             if train['line_idx'] == line_idx and 3 >= math.fabs(distance)  > 0  and self.isInNotSameDirection(speed,train['speed'],distance) :
-                if self.wait_counter < 2 and speed!=0 :
+                if self.wait_counter < 2 and speed != 0:
                     self.wait_counter += 1
                 else:
                     self.resetPath(train,line_idx,position,speed)
                 return True
         return False
+
+    def isDangerousToRide_new(self):
+        position=self.train_info['position']
+        line_idx=self.train_info['line_idx']
+        speed=self.train_info['speed'] 
+        layer1 = self.database.getBuildings()
+        all_trains = layer1['trains']
+        for train in all_trains:
+            if (
+                train["line_idx"] == line_idx
+                and 0 < math.fabs(train['position'] - position) <= 3
+                and self.isDirectionToCrash(speed, position, train["speed"], train["position"])
+                and self.resetPath(train,line_idx,position,speed)
+            ):
+                # distance = math.fabs(train['position'] - position)
+                # if 0 < distance <= 3 and self.isDirectionToCrash(speed, position, train["speed"], train["position"]):
+                # if self.resetPath(train,line_idx,position,speed):
+                self.wait_counter += 1
+            
+
+    def isDirectionToCrash(self, v1, p1, v2, p2):
+        if p1 > p2:
+            v1, v2 = v2, v1
+        return v1 > 0 and v2 < 0
             
     def step(self):
         if self.isDangerousToRide():
@@ -186,6 +211,7 @@ class TrainTask():
         pass #Just stay and wait cause this effective now ( Yes,yes - it is Kostil )
     
     def rideByPath(self):
+        self.wait_counter = 0
         position=self.train_info['position']
         line_idx=self.train_info['line_idx']
         speed=self.train_info['speed']
@@ -215,13 +241,13 @@ class TrainTask():
         old_line_idx = self.train_info['line_idx']
         old_position = self.train_info['position']
         if old_line_idx != nearest_edge.idx:
-            if nearest_edge.points[0]==nearest_point:
-                self.train_info['position'] = 0
-            else:
-                self.train_info['position'] = nearest_edge.weight
+            # if nearest_edge.points[0]==nearest_point:
+            #     self.train_info['position'] = 0
+            # else:
+            #     self.train_info['position'] = nearest_edge.weight
             self.train_info['line_idx'] = nearest_edge.idx
             return
-        self.train_info['position']+=speed
+        # self.train_info['position']+=speed
             
     def getNearestEdge(self,current_point):
         next_point = self.selected_path[0]
@@ -256,8 +282,12 @@ class TrainTask():
         else:
             additional_path_len=current_edge.weight-position
         self.selected_path_len=nx.dijkstra_path_length(nxgraph,nearest_backstep_point,endpoint,"length") + additional_path_len
+
+        if not self.selected_path:
+            return False
+
         self.rideByPath()
-        return
+        return True
         #speed = -1*speed
         #   nearest_edge,speed = self.getNearestEdge(nearest_point)
         #   nearest_point,current_position_by_edges = self.getTrainPosition(line_idx,position,speed)        
@@ -354,10 +384,18 @@ class Bot(QThread):
                 return
                 
     def calculateMinGoodsValue(self,goods_type):
+        to_full = min(train.train_info["goods_capacity"] for train in self.trains)    
+        N = -1
+        for point, replenishment in ((post["point_idx"], post["replenishment"]) for post in self.layer2_dict["posts"] if post["type"] == goods_type + 1):
+            N = max(
+                N,
+                nx.dijkstra_path_length(
+                    self.graph.nxgraph, self.town["point_idx"], point, "weight") * 2 + math.ceil(to_full / replenishment
+                )
+            )
         if goods_type == 1:
-            return 60
-        return 60
-        
+            return N * (3 + self.population)
+        return N * 2
         
     def updateData(self):  
         self.signals.update.emit()      
@@ -365,7 +403,8 @@ class Bot(QThread):
     
     def turn(self):
         self.si.turn() 
-        self.database.fullUpdate()
+        print('5_4:',datetime.datetime.now() - self.begin_loop_time)        
+        self.database.update()
 
         print('5_5:',datetime.datetime.now() - self.begin_loop_time)        
         self.drawer.notify()
@@ -397,7 +436,7 @@ class Bot(QThread):
                 for train_main_data in all_trains:
                     if train_main_data['idx'] == train_info_idx:
                         train_main_data['speed'] = train.train_info['speed']
-                        train_main_data['position'] = train.train_info['position']
+                        # train_main_data['position'] = train.train_info['position']
                         train_main_data['line_idx'] = train.train_info['line_idx']
                         break
                 self.database.setBuildings(layer1)
@@ -413,10 +452,10 @@ class Bot(QThread):
         self.player_info=self.database.getPlayerInfo().copy()
         self.town = self.player_info['town']
         trains_updated = self.player_info['trains'].copy()
-        armor = self.player_info['town']['armor']
-        product = self.player_info['town']['product']
-        population = self.player_info['town']['population']
-        print(f'product={product},armor={armor},population = {population}')
+        self.armor = self.player_info['town']['armor']
+        self.product = self.player_info['town']['product']
+        self.population = self.player_info['town']['population']
+        print(f'product={self.product},armor={self.armor},population = {self.population}')
         if not self.town_lines:
             edges=self.graph.edges
             point = self.town['point_idx']
