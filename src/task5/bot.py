@@ -341,6 +341,7 @@ class Bot(QThread):
         self.signals = BotSignals()
         self.trains = []
         self.able_trains = []
+        self.mins = [None, None]
         
     def findAbleTrains(self):
         self.able_trains = []
@@ -384,18 +385,21 @@ class Bot(QThread):
                 return
                 
     def calculateMinGoodsValue(self,goods_type):
-        to_full = min(train.train_info["goods_capacity"] for train in self.trains)    
-        N = -1
-        for point, replenishment in ((post["point_idx"], post["replenishment"]) for post in self.layer2_dict["posts"] if post["type"] == goods_type + 1):
-            N = max(
-                N,
-                nx.dijkstra_path_length(
-                    self.graph.nxgraph, self.town["point_idx"], point, "weight") * 2 + math.ceil(to_full / replenishment
+        if self.mins[goods_type - 1] is None:
+            to_full = min(train.train_info["goods_capacity"] for train in self.trains)    
+            N = -1
+            for point, replenishment in ((post["point_idx"], post["replenishment"]) for post in self.layer2_dict["posts"] if post["type"] == goods_type + 1):
+                N = max(
+                    N,
+                    nx.dijkstra_path_length(
+                        self.graph.nxgraph, self.town["point_idx"], point, "weight") * 2 + math.ceil(to_full / replenishment
+                    )
                 )
-            )
-        if goods_type == 1:
-            return N * (3 + self.population)
-        return N * 2
+            if goods_type == 1:
+                self.mins[goods_type - 1] = N * (3 + self.population)
+            else:
+                self.mins[goods_type - 1] = N * 2
+        return self.mins[goods_type - 1]
         
     def updateData(self):  
         self.signals.update.emit()      
@@ -489,22 +493,23 @@ class Bot(QThread):
         #    self.trains.append(MyTrain(train_updated))
             
     def tryToUpgrade(self,armor,product,population):
-        train_line =  self.trains[0].train_info['line_idx']
-        train_position = self.trains[0].train_info['position']
-        for town_line in self.town_lines:
-            if train_line == town_line[0] and train_position == town_line[1]:
-                if self.trains[0].train_info['next_level_price']!=None and armor > self.trains[0].train_info['next_level_price'] \
-                   and (armor - 30 > self.trains[0].train_info['next_level_price'] \
-                        or (population == 0 or product == 0 )) :
-                    self.si.upgrade(trains = [self.trains[0].train_info['idx']])      
-                    armor=-self.trains[0].train_info['next_level_price']
+        for train in self.trains:
+            train_line =  self.train.train_info['line_idx']
+            train_position = self.train.train_info['position']
+            for town_line in self.town_lines:
+                if train_line == town_line[0] and train_position == town_line[1]:
+                    if self.train.train_info['next_level_price']!=None and armor > self.train.train_info['next_level_price'] \
+                    and (armor - self.mins[1] > self.train.train_info['next_level_price'] \
+                            or (population == 0 or product == 0 )) :
+                        self.si.upgrade(trains = [self.train.train_info['idx']])      
+                        armor=-self.train.train_info['next_level_price']
         summory_trains_capacity = 0 
         for train in self.trains:
             summory_trains_capacity+=train.train_info['goods_capacity']
             
-        if summory_trains_capacity * 1.3 > self.player_info['town']['product_capacity'] :
+        if summory_trains_capacity * 1.3 > self.player_info['town']['product_capacity']:
             if self.player_info['town']['next_level_price']!=None and armor > self.player_info['town']['next_level_price'] \
-               and (armor - 30 > self.player_info['town']['next_level_price'] \
+               and (armor - self.mins[1] > self.player_info['town']['next_level_price'] \
                     or (population == 0 or product == 0 )) :
                 armor=-self.player_info['town']['next_level_price']
                 self.si.upgrade(posts = [self.player_info['town']['idx']])    
