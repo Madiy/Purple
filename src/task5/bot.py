@@ -166,30 +166,6 @@ class TrainTask():
                                 self.wait_counter+=1
                                 return True
         return False
-
-    def isDangerousToRide_new(self):
-        position=self.train_info['position']
-        line_idx=self.train_info['line_idx']
-        speed=self.train_info['speed'] 
-        layer1 = self.database.getBuildings()
-        all_trains = layer1['trains']
-        for train in all_trains:
-            if (
-                train["line_idx"] == line_idx
-                and 0 < math.fabs(train['position'] - position) <= 3
-                and self.isDirectionToCrash(speed, position, train["speed"], train["position"])
-                and self.resetPath(train,line_idx,position,speed)
-            ):
-                # distance = math.fabs(train['position'] - position)
-                # if 0 < distance <= 3 and self.isDirectionToCrash(speed, position, train["speed"], train["position"]):
-                # if self.resetPath(train,line_idx,position,speed):
-                self.wait_counter += 1
-            
-
-    def isDirectionToCrash(self, v1, p1, v2, p2):
-        if p1 > p2:
-            v1, v2 = v2, v1
-        return v1 > 0 and v2 < 0
             
     def step(self):
         self.graph_plan = self.graph.copy()
@@ -257,13 +233,13 @@ class TrainTask():
         old_line_idx = self.train_info['line_idx']
         old_position = self.train_info['position']
         if old_line_idx != nearest_edge.idx:
-            # if nearest_edge.points[0]==nearest_point:
-            #     self.train_info['position'] = 0
-            # else:
-            #     self.train_info['position'] = nearest_edge.weight
+            if nearest_edge.points[0]==nearest_point:
+                self.train_info['position'] = 0
+            else:
+                self.train_info['position'] = nearest_edge.weight
             self.train_info['line_idx'] = nearest_edge.idx
             return
-        # self.train_info['position']+=speed
+        self.train_info['position']+=speed
             
     def getNearestEdge(self,current_point):
         next_point = self.selected_path[0]
@@ -280,28 +256,66 @@ class TrainTask():
         if self.train_info['goods']!=0:
             self.callToReturn(self.priority)
         else:
-            self.makeTask(self.goods_type)   
+            goods_type = self.goods_type
+            self.goods_type= None
+            self.selected_path = []
+            self.makeTask(goods_type,self.priority)
+        return None,0
     
     def resetPath(self,dangerous_train,line_idx,position,speed):
+        print (dangerous_train['idx'])
+        print("1:" ,self.selected_path)
         nearest_backstep_point,current_edge = self.getTrainPosition(line_idx,position,speed*(-1))
-        self.train_point_idx = self.getTrainPosition(line_idx,position,speed)
+        edge_idx_to_remove = dangerous_train['line_idx']
+        _,edge_to_remove = self.getTrainPosition(edge_idx_to_remove,dangerous_train['position'],dangerous_train['speed'])
         
         endpoint = self.selected_path[-1]
-        nxgraph = self.graph.nxgraph.copy()
-        nxgraph.remove_edge(current_edge.points[0],current_edge.points[1])
-        self.selected_path = nx.dijkstra_path(nxgraph,nearest_backstep_point,endpoint,"length")
-        if self.selected_path[0] != nearest_backstep_point:
-            self.selected_path = [nearest_backstep_point] + self.selected_path
+        nxgraph = self.graph_plan.nxgraph
+
+        is_have_edge = False
+        for edge_ in  self.graph_plan.edges:
+            if edge_ == edge_to_remove:
+                is_have_edge= True
+        if is_have_edge:
+            self.graph_plan.edges.remove(edge_to_remove)
+        else:
+            return False
+        is_have_edge = False
+        for edge_ in  nxgraph.edges.items():
+            points = [edge_[0][0],edge_[0][1]]
+            if points == edge_to_remove.points:
+                is_have_edge= True
+            
+        if is_have_edge:
+            nxgraph.remove_edge(edge_to_remove.points[0],edge_to_remove.points[1])
+        else:
+            return False    
+        try:
+            self.selected_path = nx.dijkstra_path(nxgraph,nearest_backstep_point,endpoint,"length")
+        except nx.exception.NetworkXNoPath as _error:
+            self.selected_path = []
+            return False
+            
+        if position !=0 and position != current_edge.weight:
+            self.graph_plan.edges.append(edge_to_remove)
+            self.graph_plan.nxgraph.add_weighted_edges_from([edge_to_remove.points + [edge_to_remove.weight]])               
+            if self.selected_path[0] != nearest_backstep_point:
+                self.selected_path = [nearest_backstep_point] + self.selected_path
+        else:
+            self.train_info['line_idx']=self.getPathByEdges(self.selected_path)[0][0]
         additional_path_len = 0
         if current_edge.points[0] == nearest_backstep_point:
             additional_path_len = position
         else:
             additional_path_len=current_edge.weight-position
-        self.selected_path_len=nx.dijkstra_path_length(nxgraph,nearest_backstep_point,endpoint,"length") + additional_path_len
+        self.selected_path_len=nx.dijkstra_path_length(nxgraph,nearest_backstep_point,endpoint,"length") + additional_path_len   
 
-        if not self.selected_path:
+        print("2:" ,self.selected_path)        
+        if self.selected_path :
+            if self.isDangerousToRide():
+                return False
+        else:
             return False
-
         self.rideByPath()
         return True
         #speed = -1*speed
@@ -315,8 +329,7 @@ class TrainTask():
         #self.train_info['speed'] = speed
         #self.old_speed=speed
         #return        
-             
-        
+
     
 class MyTrain():
     def __init__(self,train_info):
@@ -333,6 +346,8 @@ class MyTrain():
         self.tain_info = new_info
         if self.task:
             self.task.train_info = self.tain_info
+       
+
        
         
         
@@ -456,7 +471,7 @@ class Bot(QThread):
                 for train_main_data in all_trains:
                     if train_main_data['idx'] == train_info_idx:
                         train_main_data['speed'] = train.train_info['speed']
-                        # train_main_data['position'] = train.train_info['position']
+                        train_main_data['position'] = train.train_info['position']
                         train_main_data['line_idx'] = train.train_info['line_idx']
                         break
                 self.database.setBuildings(layer1)
