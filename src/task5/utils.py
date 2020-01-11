@@ -17,7 +17,9 @@ class Edge:
 
 
 class Graph:
-    def __init__(self, points, edges, name='Untitled'):
+    def __init__(self, points, edges, name='Untitled',is_need_empty=False):
+        if is_need_empty:
+            return
         self.points = [Point(point['idx']) for point in points]
         self.edges = [Edge(e['idx'], e['length'], e['points']) for e in edges]
         self.name = name
@@ -29,6 +31,12 @@ class Graph:
         self.shortest_edge = Graph.shortest_edge(self.pos)
         self.biggest_idx_len = Graph.biggest_idx_len(self.points)
 
+    def copy(self):
+        result = Graph(None,None,None,True)
+        result.edges = self.edges.copy()
+        result.nxgraph = self.nxgraph.copy()
+        return result
+        
     @staticmethod
     def choose_layout(g):
         methods = [
