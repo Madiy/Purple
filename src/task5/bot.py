@@ -21,6 +21,7 @@ class BotSignals(QObject):
     turn = pyqtSignal()
     
 class TrainTask():
+    dangerous_speeds = [[-1,1],[-1,0],[0,1]]
     def __init__(self,train_info):
         self.path = None
         self.path_len = 0
@@ -29,6 +30,7 @@ class TrainTask():
         self.predicted_value=0
         self.database = database.ServerData()
         self.graph = self.database.getGraph()
+        self.graph_plan = self.graph.copy()
         self.train_info = train_info
         self.endpoints = self.database.getBuildings()    
         self.wait_counter = 0
@@ -37,7 +39,7 @@ class TrainTask():
         self.old_speed = 0
         self.shortest_paths_to_endpoints = []
         
-    def makeTask(self,goods_type,priority=1):
+    def makeTask(self,goods_type,priority):
         if self.goods_type == goods_type:
             self.priority = priority
         else:
@@ -72,7 +74,7 @@ class TrainTask():
         path_by_edges=[]
         for i in range(len(path)):
             line=(path[i],path[i+1])
-            edges=self.graph.edges
+            edges=self.graph_plan.edges
             for edge in edges:
                 points=edge.points
                 if points[0]==line[0]:
@@ -134,11 +136,16 @@ class TrainTask():
                 self.selected_path_len = path_len
                 self.selected_path = path        
             
-    def isInNotSameDirection(self,number1,number2,distance):
-        if (number1 >= 0 and  distance<0 and number2<=0 ) or (number1 <= 0 and  distance>0 and number2>=0  ) :
-            return True
-        return False
+    def calculateNeadedWait(self,train_idx):
+        for my_train in self.database.getPlayerInfo()['trains']:
+            if my_train['idx']==train_idx:
+                return 1
+        return 2
     
+    def getEdgeById(self,line_idx):
+        for edge in self.graph.edges:
+            if edge.idx == line_idx:
+                return edge
     def isDangerousToRide(self):
         position=self.train_info['position']
         line_idx=self.train_info['line_idx']
@@ -146,13 +153,18 @@ class TrainTask():
         layer1 = self.database.getBuildings()
         all_trains = layer1['trains']        
         for train in all_trains:
-            distance = train['position']-position
-            if train['line_idx'] == line_idx and 3 >= math.fabs(distance)  > 0  and self.isInNotSameDirection(speed,train['speed'],distance) :
-                if self.wait_counter < 2 and speed != 0:
-                    self.wait_counter += 1
-                else:
-                    self.resetPath(train,line_idx,position,speed)
-                return True
+            if line_idx == train['line_idx'] and (train['position'] != 0 and  train['position'] != self.getEdgeById(train['line_idx']).weight) :
+                distance = (train['position'] + train['speed']) -(position +speed)
+                if 3>= math.fabs(distance)  > 0 :
+                    if distance >0:
+                        speed_pair = [speed,train['speed']]
+                    else:             
+                        speed_pair=[-speed,-train['speed']]                    
+                    for dangerous_speed in TrainTask.dangerous_speeds:
+                        if speed_pair == dangerous_speed:
+                            if not self.resetPath(train,line_idx,position,speed) and self.wait_counter < self.calculateNeadedWait(train['idx']) :
+                                self.wait_counter+=1
+                                return True
         return False
 
     def isDangerousToRide_new(self):
@@ -180,9 +192,11 @@ class TrainTask():
         return v1 > 0 and v2 < 0
             
     def step(self):
+        self.graph_plan = self.graph.copy()
         if self.isDangerousToRide():
             return self.train_info['line_idx'],self.train_info['position'],self.train_info['speed']
         else:
+            self.graph_plan = self.graph.copy()
             self.rideByPath()
         return self.train_info['line_idx'],self.train_info['position'],self.train_info['speed']
         
@@ -211,7 +225,7 @@ class TrainTask():
         pass #Just stay and wait cause this effective now ( Yes,yes - it is Kostil )
     
     def rideByPath(self):
-        self.wait_counter = 0
+        self.wait_counter=0
         position=self.train_info['position']
         line_idx=self.train_info['line_idx']
         speed=self.train_info['speed']
@@ -231,6 +245,8 @@ class TrainTask():
                         self.is_complited = True
                     return
                 nearest_edge,speed = self.getNearestEdge(nearest_point)
+                if speed == 0:
+                    return
                 server_interface.ServerInterface().moveTrain( nearest_edge.idx, speed, self.train_info['idx'])
                 self.calculateNextPosition(nearest_edge,nearest_point,speed)
                 self.old_speed=speed
